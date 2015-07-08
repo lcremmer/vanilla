@@ -72,12 +72,12 @@ import java.util.ArrayList;
  */
 public final class PlaybackService extends Service
 	implements Handler.Callback
-	         , MediaPlayer.OnCompletionListener
-	         , MediaPlayer.OnErrorListener
-	         , SharedPreferences.OnSharedPreferenceChangeListener
-	         , SongTimeline.Callback
-	         , SensorEventListener
-	         , AudioManager.OnAudioFocusChangeListener
+			 , MediaPlayer.OnCompletionListener
+			 , MediaPlayer.OnErrorListener
+			 , SharedPreferences.OnSharedPreferenceChangeListener
+			 , SongTimeline.Callback
+			 , SensorEventListener
+			 , AudioManager.OnAudioFocusChangeListener
 {
 	/**
 	 * Name of the state file.
@@ -277,6 +277,10 @@ public final class PlaybackService extends Service
 	 * Static referenced-array to PlaybackActivities, used for callbacks
 	 */
 	private static final ArrayList<PlaybackActivity> sActivities = new ArrayList<PlaybackActivity>(5);
+	/**
+	 * Static reference to MusicService, used for callbacks
+	 */
+	private static MusicService sMusicService = null;
 	/**
 	 * Cached app-wide SharedPreferences instance.
 	 */
@@ -1016,12 +1020,19 @@ public final class PlaybackService extends Service
 			ArrayList<PlaybackActivity> list = sActivities;
 			for (int i = list.size(); --i != -1; )
 				list.get(i).setState(uptime, state);
+			if(sMusicService != null) {
+				sMusicService.setState(uptime, state);
+			}
 		}
 
 		if (song != null) {
 			ArrayList<PlaybackActivity> list = sActivities;
 			for (int i = list.size(); --i != -1; )
 				list.get(i).setSong(uptime, song);
+		}
+
+		if(sMusicService != null) {
+			sMusicService.setSong(uptime, song);
 		}
 
 		updateWidgets();
@@ -1115,7 +1126,8 @@ public final class PlaybackService extends Service
 			if ((mState & FLAG_EMPTY_QUEUE) != 0) {
 				setFinishAction(SongTimeline.FINISH_RANDOM);
 				setCurrentSong(0);
-				Toast.makeText(this, R.string.random_enabling, Toast.LENGTH_SHORT).show();
+				if(sMusicService == null)
+					Toast.makeText(this, R.string.random_enabling, Toast.LENGTH_SHORT).show();
 			}
 
 			int state = updateState(mState | FLAG_PLAYING);
@@ -1309,7 +1321,8 @@ public final class PlaybackService extends Service
 		} catch (IOException e) {
 			mErrorMessage = getResources().getString(R.string.song_load_failed, song.path);
 			updateState(mState | FLAG_ERROR);
-			Toast.makeText(this, mErrorMessage, Toast.LENGTH_LONG).show();
+			if(sMusicService == null)
+				Toast.makeText(this, mErrorMessage, Toast.LENGTH_LONG).show();
 			Log.e("VanillaMusic", "IOException", e);
 			
 			/* Automatically advance to next song IF we are currently playing or already did skip something
@@ -1351,6 +1364,9 @@ public final class PlaybackService extends Service
 	public boolean onError(MediaPlayer player, int what, int extra)
 	{
 		Log.e("VanillaMusic", "MediaPlayer error: " + what + ' ' + extra);
+		if(sMusicService != null) {
+			sMusicService.onError("MediaPlayer Error");
+		}
 		return true;
 	}
 
@@ -1686,8 +1702,8 @@ public final class PlaybackService extends Service
 		default:
 			throw new IllegalArgumentException("Invalid add mode: " + query.mode);
 		}
-		
-		Toast.makeText(this, getResources().getQuantityString(text, count, count), Toast.LENGTH_SHORT).show();
+		if(sMusicService == null)
+			Toast.makeText(this, getResources().getQuantityString(text, count, count), Toast.LENGTH_SHORT).show();
 	}
 
 	/**
@@ -1778,6 +1794,9 @@ public final class PlaybackService extends Service
 		ArrayList<PlaybackActivity> list = sActivities;
 		for (int i = list.size(); --i != -1; )
 			list.get(i).onTimelineChanged();
+
+		if(sMusicService != null)
+			sMusicService.onTimelineChanged();
 	}
 
 	@Override
@@ -1786,6 +1805,10 @@ public final class PlaybackService extends Service
 		ArrayList<PlaybackActivity> list = sActivities;
 		for (int i = list.size(); --i != -1; )
 			list.get(i).onPositionInfoChanged();
+
+		if(sMusicService != null) {
+			sMusicService.onPositionInfoChanged();
+		}
 	}
 
 	private final ContentObserver mObserver = new ContentObserver(null) {
@@ -1844,6 +1867,24 @@ public final class PlaybackService extends Service
 	public static void removeActivity(PlaybackActivity activity)
 	{
 		sActivities.remove(activity);
+	}
+
+	/**
+	 * Register a MusicService instance
+	 *
+	 * @param service the Service to be registered
+	 */
+	public static void registerService(MusicService service) {
+		sMusicService = service;
+	}
+
+	/**
+	 * Deregister a MusicService instance
+	 *
+	 * @param service the Service to be deregistered
+	 */
+	public static void unregisterService() {
+		sMusicService = null;
 	}
 
 	/**
@@ -2161,7 +2202,8 @@ public final class PlaybackService extends Service
 			break;
 		case ClearQueue:
 			clearQueue();
-			Toast.makeText(this, R.string.queue_cleared, Toast.LENGTH_SHORT).show();
+			if(sMusicService == null)
+				Toast.makeText(this, R.string.queue_cleared, Toast.LENGTH_SHORT).show();
 			break;
 		case ShowQueue:
 			Intent intentShowQueue = new Intent(this, ShowQueueActivity.class);
@@ -2191,6 +2233,13 @@ public final class PlaybackService extends Service
 		default:
 			throw new IllegalArgumentException("Invalid action: " + action);
 		}
+	}
+
+	/**
+	 * Returns the playing status of the current song
+	 */
+	public boolean isPlaying() {
+		return (mState & FLAG_PLAYING) != 0;
 	}
 
 	/**
