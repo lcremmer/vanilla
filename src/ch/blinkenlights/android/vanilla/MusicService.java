@@ -594,6 +594,20 @@ public class MusicService extends MediaBrowserService {
 		}
 
 		@Override
+		public void onFastForward() {
+			if(PlaybackService.hasInstance()) {
+				PlaybackService.get(MusicService.this).performAction(Action.SeekForward, null);
+			}
+		}
+
+		@Override
+		public void onRewind() {
+			if(PlaybackService.hasInstance()) {
+				PlaybackService.get(MusicService.this).performAction(Action.SeekBackward, null);
+			}
+		}
+
+		@Override
 		public void onCustomAction(String action, Bundle extras) {
 			if (CUSTOM_ACTION_REPEAT.equals(action)) {
 				if(PlaybackService.hasInstance()) {
@@ -673,6 +687,8 @@ public class MusicService extends MediaBrowserService {
 		if(PlaybackService.hasInstance()) {
 			if (PlaybackService.get(this).isPlaying()) {
 				actions |= PlaybackState.ACTION_PAUSE;
+				actions |= PlaybackState.ACTION_FAST_FORWARD;
+				actions |= PlaybackState.ACTION_REWIND;
 			}
 		}
 		return actions;
