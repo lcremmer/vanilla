@@ -34,7 +34,7 @@ import java.util.ArrayList;
 import java.lang.StringBuilder;
 
 /**
- * MediaWrapper provides an adapter backed by a MediaStore content provider.
+ * MediaStoreWrapper provides an adapter backed by a MediaStore content provider.
  *
  * Filtering is supported, as is a more specific type of filtering referred to
  * as limiting. Limiting is separate from filtering; a new filter will not

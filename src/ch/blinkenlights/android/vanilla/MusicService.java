@@ -61,20 +61,18 @@ public class MusicService extends MediaBrowserService {
 	// Action to change the repeat mode
 	private static final String CUSTOM_ACTION_SHUFFLE = "ch.blinkenlights.android.vanilla.SHUFFLE";
 
-	/**
-	 * Separators used to build MediaIDs for the MusicService
-	 */
+    // Separators used to build MediaIDs for the MediaBrowserService
 	public static final String MEDIATYPE_SEPARATOR = "/";
 	public static final String FILTER_SEPARATOR = "#";
 	public static final String ID_TYPE_ROOT = Integer.toString(MediaUtils.TYPE_INVALID);
 
 	// Music catalog manager
-	private MediaStoreWrapper mArtistAdapter;
-	private MediaStoreWrapper mAlbumAdapter;
-	private MediaStoreWrapper mSongAdapter;
-	private MediaStoreWrapper mPlaylistAdapter;
-	private MediaStoreWrapper mGenreAdapter;
-	private MediaStoreWrapper[] mAdapters = new MediaStoreWrapper[LibraryPagerAdapter.MAX_ADAPTER_COUNT];
+	private MediaStoreWrapper mArtistWrapper;
+	private MediaStoreWrapper mAlbumWrapper;
+	private MediaStoreWrapper mSongWrapper;
+	private MediaStoreWrapper mPlaylistWrapper;
+	private MediaStoreWrapper mGenreWrapper;
+	private MediaStoreWrapper[] mMediaWrappers = new MediaStoreWrapper[MediaUtils.TYPE_GENRE + 1];
 	private List<MediaBrowser.MediaItem> mAlbums = new ArrayList<MediaBrowser.MediaItem>();
 	private List<MediaBrowser.MediaItem> mArtists = new ArrayList<MediaBrowser.MediaItem>();
 	private List<MediaBrowser.MediaItem> mSongs = new ArrayList<MediaBrowser.MediaItem>();
@@ -83,14 +81,14 @@ public class MusicService extends MediaBrowserService {
 	private List<MediaBrowser.MediaItem> mFiltered = new ArrayList<MediaBrowser.MediaItem>();
 	private boolean mCatalogReady = false;
 
-	private final List<MediaBrowser.MediaItem> mRootMediaStoreWrapper = new ArrayList<MediaBrowser.MediaItem>();
+	private final List<MediaBrowser.MediaItem> mMediaRoot = new ArrayList<MediaBrowser.MediaItem>();
 
 	// Media Session
 	private MediaSession mSession;
+	private Bundle mSessionExtras;
 
 	// Indicates whether the service was started.
 	private boolean mServiceStarted;
-	private Bundle mSessionExtras;
 
 	/*
 	 * (non-Javadoc)
@@ -102,20 +100,20 @@ public class MusicService extends MediaBrowserService {
 		super.onCreate();
 
 		// Prep the Music Catalog (caches the main categories)
-		mArtistAdapter = new MediaStoreWrapper(this, MediaUtils.TYPE_ARTIST, null);
-		mAlbumAdapter = new MediaStoreWrapper(this, MediaUtils.TYPE_ALBUM, null);
-		mSongAdapter = new MediaStoreWrapper(this, MediaUtils.TYPE_SONG, null);
-		mPlaylistAdapter = new MediaStoreWrapper(this, MediaUtils.TYPE_PLAYLIST, null);
-		mGenreAdapter = new MediaStoreWrapper(this, MediaUtils.TYPE_GENRE, null);
-		mAdapters[MediaUtils.TYPE_ARTIST] = mArtistAdapter;
-		mAdapters[MediaUtils.TYPE_ALBUM] = mAlbumAdapter;
-		mAdapters[MediaUtils.TYPE_SONG] = mSongAdapter;
-		mAdapters[MediaUtils.TYPE_PLAYLIST] = mPlaylistAdapter;
-		mAdapters[MediaUtils.TYPE_GENRE] = mGenreAdapter;
+		mArtistWrapper = new MediaStoreWrapper(this, MediaUtils.TYPE_ARTIST, null);
+		mAlbumWrapper = new MediaStoreWrapper(this, MediaUtils.TYPE_ALBUM, null);
+		mSongWrapper = new MediaStoreWrapper(this, MediaUtils.TYPE_SONG, null);
+		mPlaylistWrapper = new MediaStoreWrapper(this, MediaUtils.TYPE_PLAYLIST, null);
+		mGenreWrapper = new MediaStoreWrapper(this, MediaUtils.TYPE_GENRE, null);
+		mMediaWrappers[MediaUtils.TYPE_ARTIST] = mArtistWrapper;
+		mMediaWrappers[MediaUtils.TYPE_ALBUM] = mAlbumWrapper;
+		mMediaWrappers[MediaUtils.TYPE_SONG] = mSongWrapper;
+		mMediaWrappers[MediaUtils.TYPE_PLAYLIST] = mPlaylistWrapper;
+		mMediaWrappers[MediaUtils.TYPE_GENRE] = mGenreWrapper;
 
 		// Fill and cache the root queries
 
-		mRootMediaStoreWrapper.add(new MediaBrowser.MediaItem(
+		mMediaRoot.add(new MediaBrowser.MediaItem(
 				new MediaDescription.Builder()
 					.setMediaId(Integer.toString(MediaUtils.TYPE_ARTIST))
 					.setTitle(getString(R.string.artists))
@@ -125,7 +123,7 @@ public class MusicService extends MediaBrowserService {
 					.build(), MediaBrowser.MediaItem.FLAG_BROWSABLE
 		));
 
-		mRootMediaStoreWrapper.add(new MediaBrowser.MediaItem(
+		mMediaRoot.add(new MediaBrowser.MediaItem(
 				new MediaDescription.Builder()
 					.setMediaId(Integer.toString(MediaUtils.TYPE_ALBUM))
 					.setTitle(getString(R.string.albums))
@@ -135,7 +133,7 @@ public class MusicService extends MediaBrowserService {
 					.build(), MediaBrowser.MediaItem.FLAG_BROWSABLE
 		));
 
-		mRootMediaStoreWrapper.add(new MediaBrowser.MediaItem(
+		mMediaRoot.add(new MediaBrowser.MediaItem(
 				new MediaDescription.Builder()
 					.setMediaId(Integer.toString(MediaUtils.TYPE_SONG))
 					.setTitle(getString(R.string.songs))
@@ -145,7 +143,7 @@ public class MusicService extends MediaBrowserService {
 					.build(), MediaBrowser.MediaItem.FLAG_BROWSABLE
 		));
 
-		mRootMediaStoreWrapper.add(new MediaBrowser.MediaItem(
+		mMediaRoot.add(new MediaBrowser.MediaItem(
 				new MediaDescription.Builder()
 					.setMediaId(Integer.toString(MediaUtils.TYPE_GENRE))
 					.setTitle(getString(R.string.genres))
@@ -155,7 +153,7 @@ public class MusicService extends MediaBrowserService {
 					.build(), MediaBrowser.MediaItem.FLAG_BROWSABLE
 		));
 
-		mRootMediaStoreWrapper.add(new MediaBrowser.MediaItem(
+		mMediaRoot.add(new MediaBrowser.MediaItem(
 				new MediaDescription.Builder()
 					.setMediaId(Integer.toString(MediaUtils.TYPE_PLAYLIST))
 					.setTitle(getString(R.string.playlists))
@@ -322,7 +320,7 @@ public class MusicService extends MediaBrowserService {
 
 		QueryTask query;
 		if (all && (mediaType != MediaUtils.TYPE_PLAYLIST)) {
-			query = (mAdapters[mediaType]).buildSongQuery(projection);
+			query = (mMediaWrappers[mediaType]).buildSongQuery(projection);
 			query.data = id;
 			query.mode = SongTimeline.MODE_PLAY_ID_FIRST;
 		} else {
@@ -344,35 +342,35 @@ public class MusicService extends MediaBrowserService {
 				int result = 0;
 				try {
 					if(!mCatalogReady) {
-						runQuery(mArtists, MediaUtils.TYPE_ARTIST , mArtistAdapter.getQuery());
-						runQuery(mAlbums, MediaUtils.TYPE_ALBUM, mAlbumAdapter.getQuery());
-						runQuery(mSongs, MediaUtils.TYPE_SONG, mSongAdapter.getQuery());
-						runQuery(mGenres, MediaUtils.TYPE_GENRE, mGenreAdapter.getQuery());
-						runQuery(mPlaylists, MediaUtils.TYPE_PLAYLIST, mPlaylistAdapter.getQuery());
+						runQuery(mArtists, MediaUtils.TYPE_ARTIST , mArtistWrapper.getQuery());
+						runQuery(mAlbums, MediaUtils.TYPE_ALBUM, mAlbumWrapper.getQuery());
+						runQuery(mSongs, MediaUtils.TYPE_SONG, mSongWrapper.getQuery());
+						runQuery(mGenres, MediaUtils.TYPE_GENRE, mGenreWrapper.getQuery());
+						runQuery(mPlaylists, MediaUtils.TYPE_PLAYLIST, mPlaylistWrapper.getQuery());
 						mCatalogReady = true;
 					}
 					if(limiter != null) {
 						mFiltered.clear();
 						switch(limiter.type) {
 							case MediaUtils.TYPE_ALBUM:
-								mSongAdapter.setLimiter(limiter);
-								runQuery(mFiltered, MediaUtils.TYPE_SONG, mSongAdapter.getQuery());
+								mSongWrapper.setLimiter(limiter);
+								runQuery(mFiltered, MediaUtils.TYPE_SONG, mSongWrapper.getQuery());
 							break;
 							case MediaUtils.TYPE_ARTIST:
-								mAlbumAdapter.setLimiter(limiter);
-								runQuery(mFiltered, MediaUtils.TYPE_ALBUM, mAlbumAdapter.getQuery());
+								mAlbumWrapper.setLimiter(limiter);
+								runQuery(mFiltered, MediaUtils.TYPE_ALBUM, mAlbumWrapper.getQuery());
 							break;
 							case MediaUtils.TYPE_SONG:
-								mSongAdapter.setLimiter(limiter);
-								runQuery(mFiltered, MediaUtils.TYPE_SONG, mSongAdapter.getQuery());
+								mSongWrapper.setLimiter(limiter);
+								runQuery(mFiltered, MediaUtils.TYPE_SONG, mSongWrapper.getQuery());
 							break;
 							case MediaUtils.TYPE_PLAYLIST:
-								mPlaylistAdapter.setLimiter(limiter);
-								runQuery(mFiltered, MediaUtils.TYPE_PLAYLIST, mPlaylistAdapter.getQuery());
+								mPlaylistWrapper.setLimiter(limiter);
+								runQuery(mFiltered, MediaUtils.TYPE_PLAYLIST, mPlaylistWrapper.getQuery());
 							break;
 							case MediaUtils.TYPE_GENRE:
-								mSongAdapter.setLimiter(limiter);
-								runQuery(mFiltered, MediaUtils.TYPE_SONG, mSongAdapter.getQuery());
+								mSongWrapper.setLimiter(limiter);
+								runQuery(mFiltered, MediaUtils.TYPE_SONG, mSongWrapper.getQuery());
 							break;
 						}
 					}
@@ -392,23 +390,23 @@ public class MusicService extends MediaBrowserService {
 						switch(typeFromMediaId(parentMediaId)) {
 							case MediaUtils.TYPE_ALBUM:
 								items = mAlbums;
-								mAlbumAdapter.setLimiter(null);
+								mAlbumWrapper.setLimiter(null);
 							break;
 							case MediaUtils.TYPE_ARTIST:
 								items = mArtists;
-								mArtistAdapter.setLimiter(null);
+								mArtistWrapper.setLimiter(null);
 							break;
 							case MediaUtils.TYPE_SONG:
 								items = mSongs;
-								mSongAdapter.setLimiter(null);
+								mSongWrapper.setLimiter(null);
 							break;
 							case MediaUtils.TYPE_PLAYLIST:
 								items = mPlaylists;
-								mPlaylistAdapter.setLimiter(null);
+								mPlaylistWrapper.setLimiter(null);
 							break;
 							case MediaUtils.TYPE_GENRE:
 								items = mGenres;
-								mGenreAdapter.setLimiter(null);
+								mGenreWrapper.setLimiter(null);
 							break;
 						}
 					}
@@ -452,37 +450,32 @@ public class MusicService extends MediaBrowserService {
 		populateMe.clear();
 		try {
 			Cursor cursor = query.runQuery(getContentResolver());
+
 			if (cursor == null) {
 				return;
 			}
 
-			int mode = query.mode;
-			int type = query.type;
-			long data = query.data;
-			int flags =    (mediaType != MediaUtils.TYPE_SONG)
-						&& (mediaType != MediaUtils.TYPE_PLAYLIST) ?
-						MediaBrowser.MediaItem.FLAG_BROWSABLE : MediaBrowser.MediaItem.FLAG_PLAYABLE;
-			int count = cursor.getCount();
+			final int flags =      (mediaType != MediaUtils.TYPE_SONG)
+								&& (mediaType != MediaUtils.TYPE_PLAYLIST) ?
+								    MediaBrowser.MediaItem.FLAG_BROWSABLE  : MediaBrowser.MediaItem.FLAG_PLAYABLE;
 
-			if (count == 0) {
-				cursor.close();
-				return;
-			}
+			final int count = cursor.getCount();
 
 			for (int j = 0; j != count; ++j) {
 				cursor.moveToPosition(j);
-				String label = cursor.getString(2);
+				final String id = cursor.getString(0);
+				final String label = cursor.getString(2);
 				MediaBrowser.MediaItem item = new MediaBrowser.MediaItem(
 					new MediaDescription.Builder()
 						.setMediaId(   Integer.toString(mediaType)
 									 + MEDIATYPE_SEPARATOR
-									 + cursor.getString(0)
+									 + id
 									 + FILTER_SEPARATOR
 									 + label
 									 )
 						.setTitle(label)
 						.setSubtitle(subtitleForMediaType(mediaType))
-						.setIconUri(getArtUri(mediaType, cursor.getString(0)))
+						.setIconUri(getArtUri(mediaType, id))
 						.build(),
 						flags);
 				populateMe.add(item);
@@ -510,7 +503,7 @@ public class MusicService extends MediaBrowserService {
 		if (!ID_TYPE_ROOT.equals(parentMediaId)) {
 			loadChildrenAsync(parentMediaId, result);
 		} else {
-			result.sendResult(mRootMediaStoreWrapper);
+			result.sendResult(mMediaRoot);
 		}
 	}
 
@@ -518,8 +511,8 @@ public class MusicService extends MediaBrowserService {
 	 ** MediaSession.Callback
 	 */
 	private final class MediaSessionCallback extends MediaSession.Callback {
-		@Override
-		public void onPlay() {
+
+		private void setSessionActive() {
 			if (!mServiceStarted) {
 				// The MusicService needs to keep running even after the calling MediaBrowser
 				// is disconnected. Call startService(Intent) and then stopSelf(..) when we no longer
@@ -531,6 +524,23 @@ public class MusicService extends MediaBrowserService {
 			if (!mSession.isActive()) {
 				mSession.setActive(true);
 			}
+		}
+
+		private void setSessionInactive() {
+			if(mServiceStarted) {
+				// service is no longer necessary. Will be started again if needed.
+				MusicService.this.stopSelf();
+				mServiceStarted = false;
+			}
+
+			if(mSession.isActive()) {
+				mSession.setActive(false);
+			}
+		}
+
+		@Override
+		public void onPlay() {
+			setSessionActive();
 
 			if(PlaybackService.hasInstance()) {
 				PlaybackService.get(MusicService.this).play();
@@ -546,6 +556,8 @@ public class MusicService extends MediaBrowserService {
 
 		@Override
 		public void onPlayFromMediaId(final String mediaId, Bundle extras) {
+			setSessionActive();
+
 			if(PlaybackService.hasInstance()) {
 				QueryTask query = buildQuery(mediaId, false, true);
 				PlaybackService.get(MusicService.this).addSongs(query);
@@ -564,9 +576,7 @@ public class MusicService extends MediaBrowserService {
 			if(PlaybackService.hasInstance()) {
 				PlaybackService.get(MusicService.this).pause();
 			}
-			// service is no longer necessary. Will be started again if needed.
-			MusicService.this.stopSelf();
-			mServiceStarted = false;
+			setSessionInactive();
 		}
 
 		@Override
@@ -645,12 +655,12 @@ public class MusicService extends MediaBrowserService {
 			final int shuffleMode = PlaybackService.shuffleMode(PlaybackService.get(this).getState());
 
 			stateBuilder.addCustomAction(new PlaybackState.CustomAction.Builder(
-					CUSTOM_ACTION_REPEAT, "Repeat", FINISH_ICONS[finishMode])
+					CUSTOM_ACTION_REPEAT, getString(R.string.cycle_repeat_mode), FINISH_ICONS[finishMode])
 					.setExtras(customActionExtras)
 					.build());
 
 			stateBuilder.addCustomAction(new PlaybackState.CustomAction.Builder(
-					CUSTOM_ACTION_SHUFFLE, "Shuffle", SHUFFLE_ICONS[shuffleMode])
+					CUSTOM_ACTION_SHUFFLE, getString(R.string.cycle_shuffle_mode), SHUFFLE_ICONS[shuffleMode])
 					.setExtras(customActionExtras)
 					.build());
 		}
